@@ -20,6 +20,8 @@ export default async function AdminLayout({
           <AdminNavLink href="/admin">Overview</AdminNavLink>
           <AdminNavLink href="/admin/programs">Programs</AdminNavLink>
           <AdminNavLink href="/admin/courses">Courses</AdminNavLink>
+          <AdminNavLink href="/admin/users">Users</AdminNavLink>
+          <AdminNavLink href="/admin/role-groups">Role groups</AdminNavLink>
         </nav>
         <div className="mt-6">
           <Link

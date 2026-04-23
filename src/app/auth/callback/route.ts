@@ -1,22 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeNextUrl } from "@/app/(auth)/login/sanitize-next";
 
 /**
- * Supabase invite / magic-link / recovery callback. Exchanges the one-time
- * `code` from the email link for a durable session, then routes onward.
+ * Supabase invite / magic-link / recovery callback.
  *
- * Invite flow: the user opens their "You've been invited to Sandra University"
- * email, clicks the link, lands here with `?code=...&type=invite`, we
- * exchange for a session, redirect to `/auth/set-password` to pick a
- * password before anything else.
+ * Handles:
+ *   - exchangeCodeForSession so the user ends up authenticated,
+ *   - applying `invite_token` (from the invite email's redirect_to) — wires
+ *     up system_role + user_role_groups,
+ *   - routing invite/recovery/signup to /auth/set-password.
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
   const code = searchParams.get("code");
   const type = searchParams.get("type");
   const next = searchParams.get("next");
+  const inviteToken = searchParams.get("invite_token");
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=invite_failed`);
@@ -28,9 +30,68 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=invite_failed`);
   }
 
+  if (inviteToken) {
+    await applyInvite({
+      userId: data.session.user.id,
+      token: inviteToken,
+    });
+  }
+
   if (type === "invite" || type === "recovery" || type === "signup") {
     return NextResponse.redirect(`${origin}/auth/set-password`);
   }
 
   return NextResponse.redirect(`${origin}${sanitizeNextUrl(next)}`);
+}
+
+/**
+ * Look up the invite by token and apply its system_role and role_group_ids
+ * to the user. Uses the service-role client so RLS doesn't block the writes
+ * from a learner-scoped session.
+ */
+async function applyInvite({
+  userId,
+  token,
+}: {
+  userId: string;
+  token: string;
+}) {
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    // No service-role key configured yet — skip pre-assignment. The user still
+    // lands with a 'learner' profile and can be upgraded by hand.
+    return;
+  }
+
+  const { data: invite } = await admin
+    .from("invites")
+    .select("id, system_role, role_group_ids, accepted_at")
+    .eq("token", token)
+    .maybeSingle();
+  if (!invite || invite.accepted_at) return;
+
+  await admin
+    .from("profiles")
+    .update({
+      system_role: invite.system_role as "owner" | "admin" | "learner",
+    })
+    .eq("id", userId);
+
+  const roleGroupIds = (invite.role_group_ids ?? []) as string[];
+  if (roleGroupIds.length > 0) {
+    const rows = roleGroupIds.map((rg) => ({
+      user_id: userId,
+      role_group_id: rg,
+    }));
+    await admin
+      .from("user_role_groups")
+      .upsert(rows, { onConflict: "user_id,role_group_id", ignoreDuplicates: true });
+  }
+
+  await admin
+    .from("invites")
+    .update({ accepted_at: new Date().toISOString() })
+    .eq("id", invite.id as string);
 }
