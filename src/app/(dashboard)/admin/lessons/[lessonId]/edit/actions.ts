@@ -41,7 +41,12 @@ export type BlockType =
   | "callout"
   | "external_link"
   | "embed"
-  | "divider";
+  | "divider"
+  | "video"
+  | "pdf"
+  | "image"
+  | "audio"
+  | "download";
 
 const DEFAULT_CONTENT: Record<BlockType, Record<string, unknown>> = {
   text: { html: "<p>Start writing...</p>" },
@@ -54,6 +59,11 @@ const DEFAULT_CONTENT: Record<BlockType, Record<string, unknown>> = {
   },
   embed: { iframe_src: "https://", aspect_ratio: "16:9" },
   divider: {},
+  video: { source: "upload", file_path: "", url: "" },
+  pdf: { file_path: "", filename: "", display: "inline" },
+  image: { file_path: "", alt: "", caption: "" },
+  audio: { source: "upload", file_path: "", url: "" },
+  download: { file_path: "", filename: "", size_bytes: 0, description: "" },
 };
 
 export async function createBlock(input: {

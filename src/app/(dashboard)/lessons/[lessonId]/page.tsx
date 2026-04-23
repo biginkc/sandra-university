@@ -14,6 +14,7 @@ import {
   ContentBlockRenderer,
   type ContentBlock,
 } from "@/components/content-blocks";
+import { enrichBlocksWithSignedUrls } from "@/lib/content-blocks/sign-urls";
 import { MarkCompleteButton } from "./mark-complete-button";
 import { QuizRunner, type QuizQuestion } from "./quiz-runner";
 
@@ -152,8 +153,9 @@ async function ContentLessonBody({
     .order("sort_order");
 
   const rows = (blocks ?? []) as ContentBlock[];
+  const enriched = await enrichBlocksWithSignedUrls(rows);
 
-  if (rows.length === 0) {
+  if (enriched.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -167,7 +169,7 @@ async function ContentLessonBody({
   return (
     <>
       <div className="flex flex-col gap-4">
-        {rows.map((block) => (
+        {enriched.map((block) => (
           <ContentBlockRenderer key={block.id} block={block} />
         ))}
       </div>
