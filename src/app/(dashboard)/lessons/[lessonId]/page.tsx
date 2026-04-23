@@ -15,6 +15,7 @@ import {
   type ContentBlock,
 } from "@/components/content-blocks";
 import { enrichBlocksWithSignedUrls } from "@/lib/content-blocks/sign-urls";
+import { computeQuizEligibility } from "@/lib/quizzes/attempts";
 import { MarkCompleteButton } from "./mark-complete-button";
 import { QuizRunner, type QuizQuestion } from "./quiz-runner";
 import {
@@ -210,23 +211,33 @@ async function QuizLessonBody({
   }
 
   const supabase = await createClient();
-  const [{ data: quiz }, { data: rawQuestions }] = await Promise.all([
-    supabase.from("quizzes").select("id, passing_score").eq("id", quizId).maybeSingle(),
-    // Explicitly do NOT select is_correct so it never reaches the browser.
-    supabase
-      .from("questions")
-      .select(
-        `
-        id,
-        question_text,
-        question_type,
-        sort_order,
-        answer_options ( id, option_text, sort_order )
-      `,
-      )
-      .eq("quiz_id", quizId)
-      .order("sort_order"),
-  ]);
+  const [{ data: quiz }, { data: rawQuestions }, { data: attempts }] =
+    await Promise.all([
+      supabase
+        .from("quizzes")
+        .select("id, passing_score, max_attempts, retake_cooldown_hours")
+        .eq("id", quizId)
+        .maybeSingle(),
+      // Explicitly do NOT select is_correct so it never reaches the browser.
+      supabase
+        .from("questions")
+        .select(
+          `
+          id,
+          question_text,
+          question_type,
+          sort_order,
+          answer_options ( id, option_text, sort_order )
+        `,
+        )
+        .eq("quiz_id", quizId)
+        .order("sort_order"),
+      supabase
+        .from("user_quiz_attempts")
+        .select("passed, score, completed_at")
+        .eq("quiz_id", quizId)
+        .order("completed_at", { ascending: false }),
+    ]);
 
   if (!quiz) {
     return (
@@ -238,6 +249,34 @@ async function QuizLessonBody({
           </CardDescription>
         </CardHeader>
       </Card>
+    );
+  }
+
+  const eligibility = computeQuizEligibility({
+    maxAttempts: quiz.max_attempts as number | null,
+    retakeCooldownHours: (quiz.retake_cooldown_hours as number) ?? 0,
+    attempts: (attempts ?? []).map((a) => ({
+      passed: a.passed as boolean | null,
+      score: a.score as number | null,
+      completed_at: a.completed_at as string | null,
+    })),
+    now: new Date(),
+  });
+
+  if (eligibility.state !== "open") {
+    return (
+      <QuizGateCard
+        state={eligibility.state}
+        bestScore={eligibility.bestScore}
+        attemptsUsed={eligibility.attemptsUsed}
+        maxAttempts={quiz.max_attempts as number | null}
+        nextAvailableAt={
+          eligibility.state === "cooldown"
+            ? eligibility.nextAvailableAt
+            : null
+        }
+        backHref={backHref}
+      />
     );
   }
 
@@ -257,7 +296,80 @@ async function QuizLessonBody({
       passingScore={quiz.passing_score as number}
       questions={questions}
       backHref={backHref}
+      attemptsUsed={eligibility.attemptsUsed}
+      attemptsLeft={eligibility.attemptsLeft}
     />
+  );
+}
+
+function QuizGateCard({
+  state,
+  bestScore,
+  attemptsUsed,
+  maxAttempts,
+  nextAvailableAt,
+  backHref,
+}: {
+  state: "passed" | "max_reached" | "cooldown";
+  bestScore: number | null;
+  attemptsUsed: number;
+  maxAttempts: number | null;
+  nextAvailableAt: string | null;
+  backHref: string;
+}) {
+  if (state === "passed") {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Passed</CardTitle>
+          <CardDescription>
+            You already passed this quiz with a score of {bestScore ?? 0}%.
+            You don&apos;t need to retake it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link
+            href={backHref}
+            className="text-sm underline-offset-2 hover:underline"
+          >
+            Back to course →
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (state === "max_reached") {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>No attempts left</CardTitle>
+          <CardDescription>
+            You&apos;ve used all {maxAttempts ?? attemptsUsed} attempts. Ask an
+            admin to reset if this blocks your progress.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-muted-foreground text-sm">
+          Best score so far: {bestScore ?? 0}%.
+        </CardContent>
+      </Card>
+    );
+  }
+  const when = nextAvailableAt ? new Date(nextAvailableAt) : null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Retake cooldown in effect</CardTitle>
+        <CardDescription>
+          Your next attempt opens{" "}
+          {when ? when.toLocaleString() : "soon"}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="text-muted-foreground text-sm">
+        Attempts used: {attemptsUsed}
+        {maxAttempts !== null ? ` / ${maxAttempts}` : ""}. Best score:{" "}
+        {bestScore ?? 0}%.
+      </CardContent>
+    </Card>
   );
 }
 

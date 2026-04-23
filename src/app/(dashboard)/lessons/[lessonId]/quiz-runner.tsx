@@ -31,12 +31,16 @@ export function QuizRunner({
   passingScore,
   questions,
   backHref,
+  attemptsUsed,
+  attemptsLeft,
 }: {
   quizId: string;
   lessonId: string;
   passingScore: number;
   questions: QuizQuestion[];
   backHref: string;
+  attemptsUsed: number;
+  attemptsLeft: number | null;
 }) {
   const [responses, setResponses] = useState<Record<string, string[]>>({});
   const [result, setResult] = useState<QuizSubmitResult | null>(null);
@@ -100,7 +104,12 @@ export function QuizRunner({
         <CardHeader>
           <CardTitle>Quiz</CardTitle>
           <CardDescription>
-            Passing score: {passingScore}%. You can retake if you don&apos;t pass.
+            Passing score: {passingScore}%.{" "}
+            {attemptsLeft !== null
+              ? `Attempt ${attemptsUsed + 1} of ${attemptsUsed + attemptsLeft}.`
+              : attemptsUsed > 0
+                ? `Attempt ${attemptsUsed + 1}.`
+                : "You can retake if you don't pass."}
           </CardDescription>
         </CardHeader>
       </Card>

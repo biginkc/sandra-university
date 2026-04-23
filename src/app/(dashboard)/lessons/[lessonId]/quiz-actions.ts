@@ -8,6 +8,7 @@ import {
   type ScoringQuestion,
   type ScoringResponses,
 } from "@/lib/quizzes/score";
+import { computeQuizEligibility } from "@/lib/quizzes/attempts";
 
 export type QuizSubmitResult =
   | {
@@ -33,11 +34,47 @@ export async function submitQuizAttempt(input: {
 
   const { data: quiz, error: quizErr } = await supabase
     .from("quizzes")
-    .select("id, passing_score")
+    .select("id, passing_score, max_attempts, retake_cooldown_hours")
     .eq("id", input.quizId)
     .maybeSingle();
   if (quizErr || !quiz) {
     return { ok: false, error: quizErr?.message ?? "Quiz not found." };
+  }
+
+  // Defense in depth: re-check eligibility server-side so a stale or
+  // manipulated client can't bypass max_attempts / cooldown.
+  const { data: priorAttempts } = await supabase
+    .from("user_quiz_attempts")
+    .select("passed, score, completed_at")
+    .eq("user_id", user.id)
+    .eq("quiz_id", input.quizId);
+
+  const eligibility = computeQuizEligibility({
+    maxAttempts: quiz.max_attempts as number | null,
+    retakeCooldownHours: (quiz.retake_cooldown_hours as number) ?? 0,
+    attempts: (priorAttempts ?? []).map((a) => ({
+      passed: a.passed as boolean | null,
+      score: a.score as number | null,
+      completed_at: a.completed_at as string | null,
+    })),
+    now: new Date(),
+  });
+  if (eligibility.state === "max_reached") {
+    return { ok: false, error: "You've used all of your attempts on this quiz." };
+  }
+  if (eligibility.state === "cooldown") {
+    return {
+      ok: false,
+      error: `Retake cooldown is in effect. Try again after ${new Date(
+        eligibility.nextAvailableAt,
+      ).toLocaleString()}.`,
+    };
+  }
+  if (eligibility.state === "passed") {
+    return {
+      ok: false,
+      error: "You've already passed this quiz.",
+    };
   }
 
   const { data: rawQuestions, error: qErr } = await supabase
