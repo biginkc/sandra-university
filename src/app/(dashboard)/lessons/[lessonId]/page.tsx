@@ -14,6 +14,7 @@ import {
   ContentBlockRenderer,
   type ContentBlock,
 } from "@/components/content-blocks";
+import { MarkCompleteButton } from "./mark-complete-button";
 
 export default async function LessonPage({
   params,
@@ -52,11 +53,23 @@ export default async function LessonPage({
     notFound();
   }
 
-  const { data: unlocked } = await supabase.rpc("fn_lesson_is_unlocked", {
-    p_user_id: (await supabase.auth.getUser()).data.user?.id ?? "",
-    p_lesson_id: lessonId,
-  });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
+  const [{ data: unlocked }, { data: completion }] = await Promise.all([
+    supabase.rpc("fn_lesson_is_unlocked", {
+      p_user_id: user?.id ?? "",
+      p_lesson_id: lessonId,
+    }),
+    supabase
+      .from("user_lesson_completions")
+      .select("lesson_id")
+      .eq("lesson_id", lessonId)
+      .maybeSingle(),
+  ]);
+
+  const alreadyComplete = Boolean(completion);
   const moduleJoin = firstRow(lesson.modules);
   const courseJoin = firstRow(moduleJoin?.courses);
   const courseId = courseJoin?.id as string | undefined;
@@ -84,7 +97,7 @@ export default async function LessonPage({
 
       <div className="mb-8">
         <div className="mb-2 flex items-center gap-2">
-          <LessonTypePill type={lesson.lesson_type as ContentBlock["block_type"] | string} />
+          <LessonTypePill type={lesson.lesson_type as string} />
         </div>
         <h1 className="text-2xl font-semibold">{lesson.title}</h1>
         {lesson.description ? (
@@ -104,17 +117,28 @@ export default async function LessonPage({
           </CardHeader>
         </Card>
       ) : lesson.lesson_type === "content" ? (
-        <ContentLessonBody lessonId={lessonId} />
+        <ContentLessonBody
+          lessonId={lessonId}
+          alreadyComplete={alreadyComplete}
+        />
       ) : lesson.lesson_type === "quiz" ? (
         <QuizLessonPlaceholder quizId={lesson.quiz_id as string | null} />
       ) : (
-        <AssignmentLessonPlaceholder assignmentId={lesson.assignment_id as string | null} />
+        <AssignmentLessonPlaceholder
+          assignmentId={lesson.assignment_id as string | null}
+        />
       )}
     </main>
   );
 }
 
-async function ContentLessonBody({ lessonId }: { lessonId: string }) {
+async function ContentLessonBody({
+  lessonId,
+  alreadyComplete,
+}: {
+  lessonId: string;
+  alreadyComplete: boolean;
+}) {
   const supabase = await createClient();
   const { data: blocks } = await supabase
     .from("content_blocks")
@@ -136,11 +160,19 @@ async function ContentLessonBody({ lessonId }: { lessonId: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {rows.map((block) => (
-        <ContentBlockRenderer key={block.id} block={block} />
-      ))}
-    </div>
+    <>
+      <div className="flex flex-col gap-4">
+        {rows.map((block) => (
+          <ContentBlockRenderer key={block.id} block={block} />
+        ))}
+      </div>
+      <div className="border-border mt-8 flex items-center justify-end border-t pt-6">
+        <MarkCompleteButton
+          lessonId={lessonId}
+          alreadyComplete={alreadyComplete}
+        />
+      </div>
+    </>
   );
 }
 
