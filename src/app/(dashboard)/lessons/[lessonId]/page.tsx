@@ -15,6 +15,7 @@ import {
   type ContentBlock,
 } from "@/components/content-blocks";
 import { MarkCompleteButton } from "./mark-complete-button";
+import { QuizRunner, type QuizQuestion } from "./quiz-runner";
 
 export default async function LessonPage({
   params,
@@ -122,7 +123,11 @@ export default async function LessonPage({
           alreadyComplete={alreadyComplete}
         />
       ) : lesson.lesson_type === "quiz" ? (
-        <QuizLessonPlaceholder quizId={lesson.quiz_id as string | null} />
+        <QuizLessonBody
+          quizId={lesson.quiz_id as string | null}
+          lessonId={lessonId}
+          backHref={courseId ? `/courses/${courseId}` : "/dashboard"}
+        />
       ) : (
         <AssignmentLessonPlaceholder
           assignmentId={lesson.assignment_id as string | null}
@@ -176,20 +181,88 @@ async function ContentLessonBody({
   );
 }
 
-function QuizLessonPlaceholder({ quizId }: { quizId: string | null }) {
+async function QuizLessonBody({
+  quizId,
+  lessonId,
+  backHref,
+}: {
+  quizId: string | null;
+  lessonId: string;
+  backHref: string;
+}) {
+  if (!quizId) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Quiz unavailable</CardTitle>
+          <CardDescription>No quiz is attached to this lesson.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  const supabase = await createClient();
+  const [{ data: quiz }, { data: rawQuestions }] = await Promise.all([
+    supabase.from("quizzes").select("id, passing_score").eq("id", quizId).maybeSingle(),
+    // Explicitly do NOT select is_correct so it never reaches the browser.
+    supabase
+      .from("questions")
+      .select(
+        `
+        id,
+        question_text,
+        question_type,
+        sort_order,
+        answer_options ( id, option_text, sort_order )
+      `,
+      )
+      .eq("quiz_id", quizId)
+      .order("sort_order"),
+  ]);
+
+  if (!quiz) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Quiz unavailable</CardTitle>
+          <CardDescription>
+            The quiz for this lesson couldn&apos;t be loaded.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  const questions: QuizQuestion[] = (rawQuestions ?? []).map((q) => ({
+    id: q.id as string,
+    question_text: q.question_text as string,
+    question_type: q.question_type as QuizQuestion["question_type"],
+    options: toOptionList(q.answer_options)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map((o) => ({ id: o.id as string, option_text: o.option_text as string })),
+  }));
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Quiz</CardTitle>
-        <CardDescription>
-          The quiz runner lands in the next build phase. Quiz id: {quizId ?? "(none)"}.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="text-muted-foreground text-sm">
-        Questions, randomization, retakes, and scoring will appear here.
-      </CardContent>
-    </Card>
+    <QuizRunner
+      quizId={quizId}
+      lessonId={lessonId}
+      passingScore={quiz.passing_score as number}
+      questions={questions}
+      backHref={backHref}
+    />
   );
+}
+
+type RawOptionRow = {
+  id: string;
+  option_text: string;
+  sort_order: number | null;
+};
+
+function toOptionList(value: unknown): RawOptionRow[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value as RawOptionRow[];
+  return [value as RawOptionRow];
 }
 
 function AssignmentLessonPlaceholder({
