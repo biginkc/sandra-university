@@ -87,8 +87,8 @@ export async function inviteUser(
   }
 
   // Send enrollment email listing the programs + standalone courses the
-  // invitee will have access to. Fire-and-forget — a SendGrid failure or
-  // missing SENDGRID_API_KEY shouldn't block the invite since Supabase
+  // invitee will have access to. Fire-and-forget — an SMTP failure or
+  // missing SMTP_* config shouldn't block the invite since Supabase
   // already delivered the signup link.
   await sendEnrollmentEmail({
     supabase,

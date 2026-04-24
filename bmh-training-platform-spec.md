@@ -532,9 +532,8 @@ Test tooling mirrors Sandra CRM:
 - VITE_SUPABASE_URL
 - VITE_SUPABASE_ANON_KEY
 - SUPABASE_SERVICE_ROLE_KEY (edge functions only)
-- SENDGRID_API_KEY (email send, server-only)
-- SENDGRID_FROM_EMAIL (verified sender)
-- SENDGRID_FROM_NAME (display name, defaults to "Sandra University")
+- SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS — Google Workspace SMTP
+- SMTP_FROM_EMAIL / SMTP_FROM_NAME — sender identity
 - VITE_APP_URL (used in invite and notification emails)
 
 ## Seed Data for Testing

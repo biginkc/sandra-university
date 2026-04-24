@@ -1,84 +1,68 @@
+import nodemailer from "nodemailer";
+
 /**
- * Minimal SendGrid wrapper. Uses SendGrid's v3 mail/send HTTP API so we
- * don't need to add a client SDK as a dependency. Gracefully no-ops
- * (returning { ok: false, skipped: true }) when SENDGRID_API_KEY isn't
- * configured so local development and pre-config deploys don't throw.
+ * Transactional email via SMTP. Production uses Google Workspace SMTP
+ * (smtp.gmail.com) with an app password on `jarrad@bmhgroupkc.com`.
+ * Gracefully no-ops when SMTP_* envs are absent or still `replace_me` so
+ * local dev and pre-config deploys don't throw.
  *
- * Sender policy: SendGrid requires a verified sender (single-sender
- * verification or domain authentication). Set SENDGRID_FROM_EMAIL to a
- * verified address — anything else will fail with a 403 from the API.
+ * Swapping transports (SendGrid, AWS SES, etc.) only touches the
+ * transporter construction below — the `sendEmail` contract stays stable.
  */
 export type SendResult =
-  | { ok: true; messageId: string | null }
+  | { ok: true; messageId: string }
   | { ok: false; skipped: true; reason: string }
   | { ok: false; skipped: false; error: string };
-
-const SENDGRID_ENDPOINT = "https://api.sendgrid.com/v3/mail/send";
 
 export async function sendEmail(input: {
   to: string;
   subject: string;
   html: string;
-  from?: string;
+  fromEmail?: string;
   fromName?: string;
   replyTo?: string;
 }): Promise<SendResult> {
-  const apiKey = process.env.SENDGRID_API_KEY;
-  if (!apiKey || apiKey === "replace_me") {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const port = Number(process.env.SMTP_PORT ?? "465");
+
+  if (
+    !host ||
+    !user ||
+    !pass ||
+    host === "replace_me" ||
+    user === "replace_me" ||
+    pass === "replace_me"
+  ) {
     return {
       ok: false,
       skipped: true,
-      reason: "SENDGRID_API_KEY not configured",
+      reason: "SMTP_HOST / SMTP_USER / SMTP_PASS not configured",
     };
   }
 
-  const fromEmail =
-    input.from ??
-    process.env.SENDGRID_FROM_EMAIL ??
-    "";
-  if (!fromEmail) {
-    return {
-      ok: false,
-      skipped: true,
-      reason: "SENDGRID_FROM_EMAIL not configured",
-    };
-  }
-
+  const fromEmail = input.fromEmail ?? process.env.SMTP_FROM_EMAIL ?? user;
   const fromName =
-    input.fromName ??
-    process.env.SENDGRID_FROM_NAME ??
-    "Sandra University";
+    input.fromName ?? process.env.SMTP_FROM_NAME ?? "Sandra University";
 
-  const body = {
-    personalizations: [{ to: [{ email: input.to }] }],
-    from: { email: fromEmail, name: fromName },
-    subject: input.subject,
-    content: [{ type: "text/html", value: input.html }],
-    ...(input.replyTo ? { reply_to: { email: input.replyTo } } : {}),
-  };
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    // 465 is implicit TLS; 587 is STARTTLS upgrade.
+    secure: port === 465,
+    auth: { user, pass },
+  });
 
   try {
-    const res = await fetch(SENDGRID_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
+    const info = await transporter.sendMail({
+      from: `${fromName} <${fromEmail}>`,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      replyTo: input.replyTo ?? fromEmail,
     });
-    if (!res.ok) {
-      const text = await res.text();
-      return {
-        ok: false,
-        skipped: false,
-        error: `SendGrid ${res.status}: ${text.slice(0, 400)}`,
-      };
-    }
-    // SendGrid returns 202 Accepted on success with no JSON body.
-    return {
-      ok: true,
-      messageId: res.headers.get("x-message-id"),
-    };
+    return { ok: true, messageId: info.messageId };
   } catch (e) {
     return {
       ok: false,
