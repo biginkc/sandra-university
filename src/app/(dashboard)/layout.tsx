@@ -44,7 +44,12 @@ export default async function DashboardLayout({
           Sandra University
         </Link>
         <div className="text-muted-foreground flex items-center gap-4 text-sm">
-          <span>{user.email}</span>
+          <Link
+            href="/profile"
+            className="hover:text-foreground underline-offset-2 hover:underline"
+          >
+            {user.email}
+          </Link>
           <form action="/auth/signout" method="post">
             <button
               type="submit"
