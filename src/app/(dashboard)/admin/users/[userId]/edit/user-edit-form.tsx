@@ -1,0 +1,209 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+
+import { deleteUser, saveUserSettings } from "./actions";
+
+export type RoleGroupOption = { id: string; name: string };
+
+export function UserEditForm({
+  userId,
+  initialSystemRole,
+  initialStatus,
+  initialRoleGroupIds,
+  allRoleGroups,
+  canModifyRole,
+  canSuspend,
+}: {
+  userId: string;
+  initialSystemRole: "owner" | "admin" | "learner";
+  initialStatus: "active" | "invited" | "suspended";
+  initialRoleGroupIds: string[];
+  allRoleGroups: RoleGroupOption[];
+  canModifyRole: boolean;
+  canSuspend: boolean;
+}) {
+  const router = useRouter();
+  const [systemRole, setSystemRole] = useState(initialSystemRole);
+  const [status, setStatus] = useState(initialStatus);
+  const [roleGroupIds, setRoleGroupIds] = useState<string[]>(
+    initialRoleGroupIds,
+  );
+  const [pending, startTransition] = useTransition();
+
+  function toggleGroup(id: string) {
+    setRoleGroupIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  function onSave() {
+    startTransition(async () => {
+      const result = await saveUserSettings({
+        userId,
+        system_role: systemRole,
+        status,
+        role_group_ids: roleGroupIds,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      if (result.newProgramTitles.length > 0) {
+        toast.success(
+          `Saved. Enrollment email sent for: ${result.newProgramTitles.join(", ")}.`,
+        );
+      } else {
+        toast.success("Saved.");
+      }
+    });
+  }
+
+  function onSuspendToggle() {
+    const nextStatus = status === "suspended" ? "active" : "suspended";
+    setStatus(nextStatus);
+    startTransition(async () => {
+      const result = await saveUserSettings({
+        userId,
+        system_role: systemRole,
+        status: nextStatus,
+        role_group_ids: roleGroupIds,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        setStatus(status); // revert
+      } else {
+        toast.success(
+          nextStatus === "suspended" ? "User suspended." : "User reactivated.",
+        );
+      }
+    });
+  }
+
+  function onDelete() {
+    if (
+      !confirm(
+        "Suspend this user? They'll lose access immediately. The auth account itself stays in Supabase (delete from the dashboard if you want it gone).",
+      )
+    ) {
+      return;
+    }
+    startTransition(async () => {
+      const result = await deleteUser(userId);
+      if (!result.ok) toast.error(result.error);
+      else {
+        toast.success("User suspended.");
+        router.push("/admin/users");
+      }
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="system_role">System role</Label>
+        <select
+          id="system_role"
+          value={systemRole}
+          onChange={(e) =>
+            setSystemRole(
+              e.target.value as "owner" | "admin" | "learner",
+            )
+          }
+          disabled={!canModifyRole}
+          className="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
+        >
+          <option value="learner">Learner</option>
+          <option value="admin">Admin</option>
+          <option value="owner">Owner</option>
+        </select>
+        {!canModifyRole ? (
+          <p className="text-muted-foreground text-xs">
+            You can&apos;t change your own role from this screen.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="status">Status</Label>
+        <select
+          id="status"
+          value={status}
+          onChange={(e) =>
+            setStatus(
+              e.target.value as "active" | "invited" | "suspended",
+            )
+          }
+          disabled={!canSuspend}
+          className="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
+        >
+          <option value="active">Active</option>
+          <option value="invited">Invited</option>
+          <option value="suspended">Suspended</option>
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Role groups</Label>
+        {allRoleGroups.length === 0 ? (
+          <p className="text-muted-foreground text-xs">
+            No role groups defined. Create them under Role groups.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {allRoleGroups.map((rg) => (
+              <label
+                key={rg.id}
+                className="flex items-center gap-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={roleGroupIds.includes(rg.id)}
+                  onChange={() => toggleGroup(rg.id)}
+                  className="size-4"
+                />
+                {rg.name}
+              </label>
+            ))}
+          </div>
+        )}
+        <p className="text-muted-foreground text-xs">
+          Adding a role group that grants access to a program the user
+          didn&apos;t have before triggers an enrollment email.
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t pt-4">
+        <div className="flex gap-2">
+          {canSuspend ? (
+            <Button
+              variant="outline"
+              onClick={onSuspendToggle}
+              disabled={pending}
+            >
+              {status === "suspended" ? "Reactivate" : "Suspend"}
+            </Button>
+          ) : null}
+          {canModifyRole ? (
+            <Button
+              variant="outline"
+              onClick={onDelete}
+              disabled={pending}
+              className="text-destructive hover:text-destructive"
+            >
+              Suspend + remove from list
+            </Button>
+          ) : null}
+        </div>
+        <Button onClick={onSave} disabled={pending}>
+          {pending ? "Saving..." : "Save changes"}
+        </Button>
+      </div>
+    </div>
+  );
+}

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +69,7 @@ export default async function AdminUsersPage() {
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -93,6 +95,14 @@ export default async function AdminUsersPage() {
                         >
                           {p.status as string}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Link
+                          href={`/admin/users/${p.id as string}/edit`}
+                          className="text-xs underline underline-offset-4"
+                        >
+                          Edit
+                        </Link>
                       </TableCell>
                     </TableRow>
                   ))}
